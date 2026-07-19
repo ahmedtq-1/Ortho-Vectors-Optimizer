@@ -21,7 +21,7 @@ Developed by **Ahmed Qanadeely**.
    ```bash
    pip install psutil
    ```
-3. Place your `osmconvert.exe` and `osmfilter.exe` binaries inside your utility bin directory (e.g., `C:\Ortho_OSM`).
+3. Place your `osmconvert.exe` and `osmfilter.exe` binaries inside your utility bin directory (e.g., `C:\Ortho_OSM`). You can download the official **osmconvert** and **osmfilter** executables directly from the [OpenStreetMap Wiki Program Downloads](https://openstreetmap.org) and place both binaries inside your designated utility folder.
 
 ---
 
