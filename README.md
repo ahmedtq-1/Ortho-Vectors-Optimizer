@@ -34,3 +34,13 @@ Developed by **Ahmed Qanadeely**.
    * **Create Real OSM Data Mesh**: Slices localized `.pbf` map entries into fully populated, real vector assets.
 4. Verify your folder directory paths and click **START PROCESSING BATCH**.
 5. If you need to stop or close the window, simply exit or close the panel. The application will trigger an auto-save rule to snapshot your entire workspace state matrix safely.
+
+## ☕ Support the Project
+
+If this tool saved you hours of scenery downloading and improved your X-Plane setup, consider supporting my work!
+
+👉 **[Support via PayPal](https://paypal.me/ahmedtq)**
+
+*Every gift is greatly appreciated and helps me maintain and optimize this utility and more for the community!
+
+Feel free to suggest any other tool or enhancement.
