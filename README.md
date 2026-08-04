@@ -6,10 +6,10 @@ Developed by **Ahmed Qanadeely**.
 
 ## 🚀 Key Features
 
-* **Instant Step 1 Bypassing**: Generates optimized 3 KB bypass payload files (`.osm.bz2`) on the fly. This forces Ortho4XP to safely skip Internet downloading phases, allowing **SimHeaven X-World** and native X-Plane 12 layers to handle global object positioning with 100% accurate alignment.
-* **Offline Master PBF Slicing**: Reads local `.pbf` country map extract files (e.g., from Geofabrik) and uses native space-separated `osmfilter` syntax queries to cut and sort genuine feature data into structured 1x1 degree tiles ready for Ortho4XP processing.
-* **Global Scan Matrix Preset**: Includes a one-click world matrix option mapping all coordinates from `-85°` to `85°` Latitude and `-180°` to `180°` Longitude (Exactly 61,731 tile checkpoints).
-* **Cross-Reactive UI Freezing**: Automatically locks out utility bins and file path browse triggers when placeholder mode is selected, keeping the user interface completely stabilized.
+* **Instant Step 1 Bypassing**: Generates optimized 3 KB bypass payload files (`.osm.bz2`) on the fly. This forces Ortho4XP to safely skip Internet downloading phases, allowing **SimHeaven X-World** and native X-Plane 12 layers to handle global object positioning with 100% accurate alignment.(not tested)
+* **Offline Master PBF Slicing**: Reads local `.pbf` country map extract files (e.g., from Geofabrik) and uses native space-separated `osmfilter` syntax queries to cut and sort genuine feature data into structured 1x1 degree tiles ready for Ortho4XP processing.(tested and working)
+* **Added the auto Download for Opentopgraphy GLO-30 using API Key for global quality DEM.(Terrain Quality)
+* **Cross-Reactive UI Freezing**: Automatically locks out utility bins and file path browse triggers when OSM mode is selected, keeping the user interface completely stabilized.
 * **Full State Matrix Checkpointing**: Saves your exact paths, selected region presets, dropdown modes, coordinate entry fields, and completed tile checklists every single time you close or exit the application. It auto-prompts on boot to resume your previous work instantly.
 
 ---
