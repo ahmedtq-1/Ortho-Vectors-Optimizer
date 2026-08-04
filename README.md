@@ -1,5 +1,5 @@
 # Ortho-Vectors-Optimizer
-A powerful offline utility that bypasses lengthy Ortho4XP Step 1 OSM data downloads when using SimHeaven and native X-Plane 12 DSF layers. It dramatically shortens tile creation times without affecting final scenery quality
+A powerful offline utility that bypasses lengthy Ortho4XP Step 1 OSM data downloads when using SimHeaven and native X-Plane 12 DSF layers. It dramatically shortens tile creation times without affecting final scenery quality. it also allow to automatically download GLO-30 DEM from opentopography using API Key that can be obtained from Opentopography site.
 Developed by **Ahmed Qanadeely**.
 
 ---
