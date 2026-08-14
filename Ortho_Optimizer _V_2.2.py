@@ -141,6 +141,9 @@ _is_loading_prefs = False
 completed_lock = threading.Lock()
 subprocess_lock = threading.Lock()
 
+all_tiles_to_process_global = []
+ortho_tiles_to_process_global = []
+
 # === MAP SELECTOR STATE ===============================================
 OSM_TILE_URL_TEMPLATE = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 OSM_TILE_USER_AGENT = "Ortho4XP-Vectors-Optimizer/1.3 (personal desktop utility)"
@@ -1878,7 +1881,7 @@ def test_ortho4xp_single_tile():
     threading.Thread(target=worker, daemon=True).start()
 
 def run_ortho4xp_batch():
-    global ortho4xp_is_paused, ortho4xp_stop_requested
+    global ortho4xp_is_paused, ortho4xp_stop_requested, ortho_tiles_to_process_global
     exe_path = ortho4xp_exe_var.get().strip()
     if not exe_path or not os.path.exists(exe_path):
         messagebox.showerror("Validation Error", "Please select a valid Ortho4XP.exe first."); return
@@ -1901,6 +1904,8 @@ def run_ortho4xp_batch():
             tiles_to_process = [(lat, lon) for lat in range(S_LAT, E_LAT + 1) for lon in range(S_LON, E_LON + 1)]
         except (ValueError, TypeError):
             messagebox.showerror("Format Error", "Coordinates parameters must use whole integers only and must not be empty!"); return
+
+    ortho_tiles_to_process_global = tiles_to_process
 
     if not tiles_to_process:
         messagebox.showinfo("No Tiles Selected", "There are no tiles in the current selection to process.")
@@ -2326,8 +2331,86 @@ def open_opentopo_link(event):
 def open_ot_api_key_link(event):
     webbrowser.open_new("https://portal.opentopography.org/myopentopo/")
 
-def on_close_purge(complete_success=False, save_session_files=False):
-    global unique_pid, util_path_var, active_subprocesses, pool_executor, session_file_path, master_region_path
+def cleanup_incomplete_osm_data():
+    dest_dir = dest_path_var.get().strip()
+    if not dest_dir or not os.path.isdir(dest_dir):
+        return
+
+    with completed_lock:
+        completed_set = set(resume_list)
+    
+    all_tile_ids = [_ortho4xp_tile_id(lat, lon) for lat, lon in all_tiles_to_process_global]
+    
+    tiles_to_remove = [tile_id for tile_id in all_tile_ids if tile_id not in completed_set]
+
+    if not tiles_to_remove:
+        return
+
+    for tile_id in tiles_to_remove:
+        coords = _tile_name_to_lat_lon(tile_id)
+        if not coords: continue
+        t_lat, t_lon = (coords[0] // 10) * 10, (coords[1] // 10) * 10
+        group_folder_name = f"{'+' if t_lat >= 0 else '-'}{str(abs(t_lat)).zfill(2)}{'+' if t_lon >= 0 else '-'}{str(abs(t_lon)).zfill(3)}"
+        tile_folder_path = os.path.join(dest_dir, group_folder_name, tile_id)
+        if os.path.isdir(tile_folder_path):
+            try:
+                shutil.rmtree(tile_folder_path)
+            except Exception:
+                pass
+
+def cleanup_incomplete_ortho_data():
+    dest_dir = ortho4xp_output_var.get().strip()
+    ortho_dir = get_ortho4xp_dir()
+
+    completed_set = set(ortho4xp_resume_list)
+    all_tile_ids = [_ortho4xp_tile_id(lat, lon) for lat, lon in ortho_tiles_to_process_global]
+    tiles_to_remove = [tile_id for tile_id in all_tile_ids if tile_id not in completed_set]
+    
+    if not tiles_to_remove:
+        return
+
+    tile_folders_to_remove = [f"zOrtho4XP_{tile_id}" for tile_id in tiles_to_remove]
+
+    search_dirs_for_tiles = []
+    if dest_dir and os.path.isdir(dest_dir):
+        search_dirs_for_tiles.append(dest_dir)
+    default_tile_root = os.path.join(ortho_dir, "Tiles") if ortho_dir else None
+    if default_tile_root and os.path.isdir(default_tile_root) and default_tile_root not in search_dirs_for_tiles:
+        search_dirs_for_tiles.append(default_tile_root)
+    internal_tile_root = os.path.join(ortho_dir, "_internal", "Ortho4XP_Data", "Tiles") if ortho_dir else None
+    if internal_tile_root and os.path.isdir(internal_tile_root) and internal_tile_root not in search_dirs_for_tiles:
+        search_dirs_for_tiles.append(internal_tile_root)
+
+    for tile_folder in tile_folders_to_remove:
+        for base_dir in search_dirs_for_tiles:
+            full_path = os.path.join(base_dir, tile_folder)
+            if os.path.isdir(full_path):
+                try:
+                    shutil.rmtree(full_path)
+                except Exception:
+                    pass
+
+def on_close_requested():
+    is_osm_running = progress_frame.winfo_ismapped()
+    is_ortho_running = ortho_progress_frame.winfo_ismapped()
+
+    if is_osm_running or is_ortho_running:
+        if messagebox.askyesno("Process Running", 
+                               "A batch process is currently running. Closing now will stop it.\n\n"
+                               "All incomplete tile data will be deleted. Are you sure you want to exit and clean up?"):
+            if is_osm_running:
+                cleanup_incomplete_osm_data()
+            if is_ortho_running:
+                cleanup_incomplete_ortho_data()
+            
+            on_close_purge(complete_success=False)
+        # else: user cancelled, do nothing
+    else:
+        save_last_paths_checkpoint()
+        on_close_purge(complete_success=False)
+
+def on_close_purge(complete_success=False):
+    global active_subprocesses, pool_executor
     close_map_window()
     if pool_executor:
         try: pool_executor.shutdown(wait=False, cancel_futures=True)
@@ -2341,70 +2424,12 @@ def on_close_purge(complete_success=False, save_session_files=False):
     t_dir = _get_app_data_dir("Temp")
     if os.path.exists(t_dir):
         time.sleep(0.5)
-        
-        if complete_success or not save_session_files:
-            try:
-                shutil.rmtree(t_dir, ignore_errors=True)
-            except Exception:
-                pass
-        else:
-            pass
-
+        # Always clear temp on exit unless it was a fully successful run.
+        if not complete_success:
+            try: shutil.rmtree(t_dir, ignore_errors=True)
+            except Exception: pass
     try: root.destroy()
     except: pass
-def trigger_live_pause():
-    global is_paused
-    is_paused = True
-    btn_pause.pack_forget()
-    btn_resume.pack(side='left', padx=10, pady=10)
-    status_var.set("Status: Frozen. Click Resume to continue.")
-    root.update_idletasks()
-
-def trigger_live_resume():
-    global is_paused
-    is_paused = False
-    btn_resume.pack_forget()
-    btn_pause.pack(side='left', padx=10, pady=10)
-    status_var.set("Status: Resuming loops...")
-    root.update_idletasks()
-
-def trigger_save_exit():
-    global is_paused, resume_list, session_file_path
-    is_paused = True
-    status_var.set("Status: Checkpointing full operating environment state matrix...")
-    root.update_idletasks()
-    with completed_lock:
-        completed_checklist_snapshot = list(resume_list)
-    state_payload = {
-        "mode_selection": mode_combo.get(),
-        "preset_selection": preset_combo.get(),
-        "lat_s": lat_s_entry.get().strip(),
-        "lat_n": lat_n_entry.get().strip(),
-        "lon_w": lon_w_entry.get().strip(),
-        "lon_e": lon_e_entry.get().strip(),
-        "util_path": util_path_var.get().strip(),
-        "file_path": file_path_var.get().strip(),
-        "dest_path": dest_path_var.get().strip(),
-        "ortho4xp_exe": ortho4xp_exe_var.get().strip(),
-        "ortho4xp_output": ortho4xp_output_var.get().strip(),
-        "ortho4xp_imagery": ortho_imagery_var.get().strip(),
-        "ortho4xp_zl": ortho_zl_var.get().strip(),
-        "ortho4xp_dem_choice": ortho_dem_choice_var.get().strip(),
-        "ortho4xp_dem_path": ortho_dem_custom_path_var.get().strip(),
-        "ortho4xp_override_step1": ortho_override_step1_var.get(),
-        "ot_api_key": ot_api_key_var.get().strip(),
-        "completed_checklist": completed_checklist_snapshot,
-        "ortho4xp_apply_defaults": ortho_apply_defaults_var.get(),
-    }
-    try:
-        t_dir = _get_app_data_dir("Temp")
-        target_file = session_file_path if session_file_path else os.path.join(t_dir, "osm_session.json")
-        with open(target_file, "w", encoding="utf-8") as sf: json.dump(state_payload, sf, indent=4)
-        save_last_paths_checkpoint()
-    except: pass
-    time.sleep(1.0)
-    messagebox.showinfo("Session Saved", "Your progress and settings have been saved. You can close the application and it will resume from this point on next launch.")
-    on_close_purge(complete_success=False, save_session_files=True)
 
 def _save_osm_session_file():
     if not session_file_path: return
@@ -2507,7 +2532,7 @@ def find_tool_in_dir(directory, tool_prefix):
     return default_path
 
 def run_matrix_pipeline():
-    global session_file_path, master_region_path, unique_pid, resume_list, map_individual_selection
+    global session_file_path, master_region_path, unique_pid, resume_list, map_individual_selection, all_tiles_to_process_global
     sel_file, out_dir, bin_dir = file_path_var.get().strip(), dest_path_var.get().strip(), util_path_var.get().strip()
 
     paths_to_check = {
@@ -2549,6 +2574,8 @@ def run_matrix_pipeline():
                     all_tiles_to_process.append((lat, lon))
         except (ValueError, TypeError):
             messagebox.showerror("Format Error", "Coordinates parameters must use whole integers only and must not be empty!"); return
+
+    all_tiles_to_process_global = all_tiles_to_process
 
     if not all_tiles_to_process:
         messagebox.showinfo("No Tiles Selected", "There are no tiles in the current selection to process.")
@@ -2665,10 +2692,8 @@ def bg_worker_process(all_tiles, util_dir, storage_dir, selected_file, osmconver
 
 
     def process_single_tile_thread(worker_args):
-        global unique_pid, active_subprocesses, session_file_path, is_paused
-        while is_paused: time.sleep(0.01)
+        global unique_pid, active_subprocesses, session_file_path
         (lat_coord, lon_coord), chunk_master_path, custom_env = worker_args
-
         l_p = "+" if lat_coord >= 0 else "-"
         o_p = "+" if lon_coord >= 0 else "-"
         base_folder_name = f"{l_p}{str(abs(lat_coord)).zfill(2)}{o_p}{str(abs(lon_coord)).zfill(3)}"
@@ -2741,8 +2766,6 @@ def bg_worker_process(all_tiles, util_dir, storage_dir, selected_file, osmconver
                     try: shutil.rmtree(scr_dir, ignore_errors=True)
                     except: pass
                     return "FAILED", base_folder_name
-            if is_paused: return "PAUSED", base_folder_name
-
             filters = {
                 "_airports.osm": 'aeroway=airport =aerodrome =apron =runway =taxiway =helipad',
                 "_big_roads.osm": 'highway=motorway =motorway_link =trunk =trunk_link =primary =primary_link =secondary =secondary_link',
@@ -2751,7 +2774,6 @@ def bg_worker_process(all_tiles, util_dir, storage_dir, selected_file, osmconver
                 "_water.osm": 'natural=water water=polygon =lake =river =reservoir waterway=riverbank =dock'
             }
             for suffix, query in filters.items():
-                if is_paused: return "PAUSED", base_folder_name
                 final_bz2 = os.path.abspath(os.path.join(tile_folder, f"{base_folder_name}{suffix}.bz2"))
                 if os.path.exists(final_bz2) and os.path.getsize(final_bz2) > 2000: continue
                 r_out = os.path.abspath(os.path.join(scr_dir, f"raw_{suffix}"))
@@ -2820,8 +2842,7 @@ def bg_worker_process(all_tiles, util_dir, storage_dir, selected_file, osmconver
             try: shutil.rmtree(scr_dir, ignore_errors=True)
             except: pass
             with completed_lock:
-                if base_folder_name not in resume_list and not is_paused:
-                    resume_list.append(base_folder_name)
+                if base_folder_name not in resume_list: resume_list.append(base_folder_name)
             gc.collect(); return "SUCCESS", base_folder_name
         except OSError as tile_err:
             if scr_dir:
@@ -2829,7 +2850,7 @@ def bg_worker_process(all_tiles, util_dir, storage_dir, selected_file, osmconver
                 except: pass
             print(f"[Tile {base_folder_name}] Temp/file access error - marking FAILED: {tile_err}")
             return "FAILED", base_folder_name
-
+    
     # If it's an individual (potentially non-contiguous) selection, we process each tile as its own chunk
     # to avoid creating a massive intermediate data file from a huge bounding box.
     if mode_selection == "Create Real OSM Data Mesh" and is_individual_selection:
@@ -2842,7 +2863,6 @@ def bg_worker_process(all_tiles, util_dir, storage_dir, selected_file, osmconver
     t_chunks = [all_tiles[i:i + c_size] for i in range(0, total_tiles, c_size)]
 
     for chunk_idx, current_chunk in enumerate(t_chunks):
-        if is_paused: break
         chunk_ready = True
         for c_lat, c_lon in current_chunk:
             t_chk = f"{'+' if c_lat >= 0 else '-'}{str(abs(c_lat)).zfill(2)}{'+' if c_lon >= 0 else '-'}{str(abs(c_lon)).zfill(3)}"
@@ -2896,7 +2916,6 @@ def bg_worker_process(all_tiles, util_dir, storage_dir, selected_file, osmconver
                             active_subprocesses.append(p)
                         m_start = time.time()
                         while p.poll() is None:
-                            if is_paused: break
                             status_text = f"Package {chunk_idx + 1}/{len(t_chunks)} Scan... [Elapsed: {int(time.time() - m_start)}s]"
                             root.after(0, lambda s=status_text: status_var.set(s))
                             time.sleep(0.5)
@@ -2948,7 +2967,6 @@ def bg_worker_process(all_tiles, util_dir, storage_dir, selected_file, osmconver
         pool_executor = ThreadPoolExecutor(max_workers=num_workers if mode_selection == "Create Real OSM Data Mesh" else max(4, num_workers))
         
         for status, tile_name in pool_executor.map(process_single_tile_thread, worker_args):
-            if is_paused or status == "PAUSED": break
             if status == "FAILED":
                 failed_osm_tiles.append(tile_name)
             with completed_lock:
@@ -2959,12 +2977,10 @@ def bg_worker_process(all_tiles, util_dir, storage_dir, selected_file, osmconver
             status_text = f"Package {chunk_idx + 1}/{len(t_chunks)} | Compiling: {tile_name}"
             metrics_text = f"Completed: {completed_tiles} | Remaining: {rem_t} | Total: {total_tiles}\nElapsed: {l_elap // 60}m {l_elap % 60}s | Avg/Tile: {round(avg_t, 2)}s\nETC: {raw_etc // 60}m {raw_etc % 60}s"
             root.after(0, lambda s=status_text, m=metrics_text, p=completed_tiles: (status_var.set(s), metrics_var.set(m), progress_bar.config(value=p)))
-        pool_executor.shutdown(wait=True)
-        if not is_paused:
-            _save_osm_session_file()
+        pool_executor.shutdown(wait=True)        
+        _save_osm_session_file()
         gc.collect()
-    if not is_paused:
-        root.after(0, lambda: _handle_bg_worker_completion(total_tiles, loop_start_time, failed_osm_tiles))
+    root.after(0, lambda: _handle_bg_worker_completion(total_tiles, loop_start_time, failed_osm_tiles))
 
 root = tk.Tk(); root.title("Ortho4XP Vector & Batch Helper"); root.minsize(780, 500)
 
@@ -3034,7 +3050,7 @@ def _on_mousewheel(event):
     canvas.yview_scroll(scroll_speed, "units")
 root.bind_all("<MouseWheel>", _on_mousewheel)
 
-root.protocol("WM_DELETE_WINDOW", lambda: (save_last_paths_checkpoint(), on_close_purge(complete_success=False, save_session_files=False)))
+root.protocol("WM_DELETE_WINDOW", on_close_requested)
 file_path_var, dest_path_var, util_path_var = tk.StringVar(), tk.StringVar(), tk.StringVar()
 ortho4xp_exe_var, ortho_imagery_var, ortho_zl_var = tk.StringVar(), tk.StringVar(), tk.StringVar()
 ortho4xp_output_var = tk.StringVar()
@@ -3150,14 +3166,11 @@ action_frame = ttk.Frame(input_frame)
 action_frame.grid(row=14, column=0, columnspan=3, pady=10, sticky='w')
 btn_run = ttk.Button(action_frame, text="Step 1: Create/Update OSM Data", command=run_matrix_pipeline, style="Success.TButton", width=38)
 btn_run.pack(side='left', padx=(0, 10))
-btn_clean_osm = ttk.Button(action_frame, text="Clean Up OSM Data", command=cleanup_osm_data, style="Danger.TButton")
-btn_clean_osm.pack(side='left', padx=(0, 10))
+ttk.Button(action_frame, text="Clean Up OSM Data", command=cleanup_osm_data, style="Danger.TButton").pack(side='left', padx=(0, 10))
 ttk.Button(action_frame, text="Clear Temp/Cache", command=cleanup_app_temp_folder, style="Warning.TButton").pack(side='left')
 progress_frame = ttk.Frame(scrollable_frame); status_var, metrics_var = tk.StringVar(), tk.StringVar(); status_var.set("Status: Awaiting execution initialization..."); metrics_var.set("Completed: 0  |  Remaining: 0  |  Total Tiles: 0")
 ttk.Label(progress_frame, textvariable=status_var, font=("Arial", 10, "bold")).pack(anchor='w', pady=5); progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", length=530, mode="determinate"); progress_bar.pack(fill='x', pady=10)
-ttk.Label(progress_frame, textvariable=metrics_var, font=("Arial", 9, "italic")).pack(anchor='w', pady=5); btn_container = ttk.Frame(progress_frame); btn_container.pack(pady=10)
-btn_pause = ttk.Button(btn_container, text="Pause OSM Creation", command=trigger_live_pause, style="Warning.TButton", width=24); btn_pause.pack(side='left', padx=10)
-btn_resume = ttk.Button(btn_container, text="Resume OSM Creation", command=trigger_live_resume, style="Success.TButton", width=24); btn_save_exit = ttk.Button(btn_container, text="Save For Later & Exit", command=trigger_save_exit, style="Save.TButton", width=24); btn_save_exit.pack(side='left', padx=10)
+ttk.Label(progress_frame, textvariable=metrics_var, font=("Arial", 9, "italic")).pack(anchor='w', pady=5)
 link_container = ttk.Frame(scrollable_frame); link_container.pack(fill='x', expand=True, padx=10, pady=(5,0)); link_label = ttk.Label(link_container, text="Download master .pbf data from Geofabrik", font=("Arial", 9, "underline"), foreground="#3498db", cursor="hand2"); link_label.pack(anchor='w'); link_label.bind("<Button-1>", open_geofabrik_link)
 dem_link_container = ttk.Frame(scrollable_frame); dem_link_container.pack(fill='x', expand=True, padx=10, pady=(0,5)); 
 dem_link_label = ttk.Label(dem_link_container, text="Download high-resolution DEM from OpenTopography (for custom DEM file)", font=("Arial", 9, "underline"), foreground="#3498db", cursor="hand2")
