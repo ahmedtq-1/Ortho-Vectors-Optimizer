@@ -33,6 +33,7 @@ A powerful offline utility that bypasses lengthy Ortho4XP Step 1 OSM data downlo
    * **Create Real OSM Data Mesh**: Slices localized `.pbf` map entries into fully populated, real vector assets.
 4. Verify your folder directory paths and click **START PROCESSING BATCH**.
 5. If you need to stop or close the window, simply exit or close the panel. The application will trigger an auto-save rule to snapshot your entire workspace state matrix safely.
+<img width="234" height="1366" alt="image" src="https://github.com/user-attachments/assets/0ad12532-5a80-4645-87e3-ec3dbba2cd0b" />
 
 ## ☕ Support the Project
 
